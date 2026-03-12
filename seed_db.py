@@ -3,7 +3,8 @@ from langchain_chroma import Chroma
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
 # 1. SET YOUR API KEY
-os.environ["GOOGLE_API_KEY"] = "AIzaSyAl5iq8WX3Ga04RqT8SkXAsMD77BN1Cevs"
+#os.environ["GOOGLE_API_KEY"] = "AIzaSyAl5iq8WX3Ga04RqT8SkXAsMD77BN1Cevs"
+api_key = os.getenv("GOOGLE_API_KEY")
 
 def initialize_knowledge_base():
     initial_knowledge = [
