@@ -12,14 +12,13 @@ from langgraph.graph import StateGraph, START, END
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from langchain_chroma import Chroma
-#from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-# --- 1. LIGHT-THEME UI SETUP ---
+# --- 1. CONFIGURATION & UI SETUP ---
 st.set_page_config(page_title="Risk Intel Pro", layout="wide", page_icon="🛡️")
 
-# Constants for S3 & Vector DB
-LOCAL_DB_PATH = "./chroma_db"
+# Syncing the path to the standard used in seed_db
+LOCAL_DB_PATH = "/tmp/vector_db"
 S3_VECTOR_PREFIX = "vector_db/" 
 
 st.markdown("""
@@ -38,7 +37,6 @@ st.markdown("""
     }
     .metric-label { color: #64748b; font-weight: 600; font-size: 0.9rem; text-transform: uppercase; }
     .metric-value { color: #1e293b; font-size: 2rem; font-weight: 800; }
-    .stChatMessage { background-color: #f1f5f9 !important; border: 1px solid #cbd5e1 !important; color: #000000 !important; }
     </style>
     
     <div class="main-header">
@@ -57,15 +55,15 @@ try:
         "s3",
         aws_access_key_id=st.secrets["AWS_ACCESS_KEY_ID"],
         aws_secret_access_key=st.secrets["AWS_SECRET_ACCESS_KEY"],
-        region_name=st.secrets["AWS_DEFAULT_REGION"]
+        region_name=st.secrets.get("AWS_DEFAULT_REGION", "us-east-1")
     )
     BUCKET_NAME = st.secrets["S3_BUCKET"]
 except Exception as e:
-    st.error("🔑 Credentials Missing in Secrets!")
+    st.error("🔑 Credentials Missing in Secrets! Check Google and AWS keys.")
     st.stop()
 
 def sync_from_s3():
-    """Download ChromaDB files from S3 to local disk if they exist."""
+    """Download ChromaDB files from S3 to local /tmp storage."""
     if not os.path.exists(LOCAL_DB_PATH):
         os.makedirs(LOCAL_DB_PATH)
     try:
@@ -73,22 +71,13 @@ def sync_from_s3():
         for result in paginator.paginate(Bucket=BUCKET_NAME, Prefix=S3_VECTOR_PREFIX):
             if 'Contents' in result:
                 for obj in result['Contents']:
+                    # Recreate local folder structure from S3 keys
                     rel_path = os.path.relpath(obj['Key'], S3_VECTOR_PREFIX)
                     local_file = os.path.join(LOCAL_DB_PATH, rel_path)
                     os.makedirs(os.path.dirname(local_file), exist_ok=True)
                     s3_client.download_file(BUCKET_NAME, obj['Key'], local_file)
     except Exception as e:
         st.sidebar.warning(f"S3 Sync Note: {e}")
-
-def sync_to_s3():
-    """Upload local ChromaDB files back to S3."""
-    with st.spinner("Syncing Knowledge Base to Cloud..."):
-        for root, _, files in os.walk(LOCAL_DB_PATH):
-            for file in files:
-                local_path = os.path.join(root, file)
-                s3_key = os.path.join(S3_VECTOR_PREFIX, os.path.relpath(local_path, LOCAL_DB_PATH))
-                s3_client.upload_file(local_path, BUCKET_NAME, s3_key)
-        st.sidebar.success("Cloud Sync Complete!")
 
 # --- 3. DATA & VECTOR ENGINE ---
 @st.cache_data
@@ -112,11 +101,14 @@ def get_safe_col(df, options):
 @st.cache_resource
 def init_vector_db():
     sync_from_s3()
-    embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
-    # Initialize Chroma. If local_db_path exists, it loads it.
+    # UPDATED: Use Gemini Embedding 2 with explicit v1 version
+    emb = GoogleGenerativeAIEmbeddings(
+        model="models/gemini-embedding-2-preview",
+        model_api_version="v1"
+    )
     v_db = Chroma(
         persist_directory=LOCAL_DB_PATH,
-        embedding_function=embeddings,
+        embedding_function=emb,
         collection_name="risk_policies"
     )
     return v_db
@@ -124,20 +116,21 @@ def init_vector_db():
 vector_db = init_vector_db()
 
 # --- 4. AGENTIC BRAIN ---
-#llm = ChatGoogleGenerativeAI(model="models/gemini-1.5-flash", temperature=0.1)
+# UPDATED: Unified all agents to use Gemini 3 Flash
 llm = ChatGoogleGenerativeAI(
     model="gemini-3-flash-preview", 
-    google_api_key=st.secrets["GOOGLE_API_KEY"]
+    google_api_key=api_key,
+    version="v1"
 )
+
 class AgentState(TypedDict):
     messages: Annotated[List[BaseMessage], "History"]
 
 def rag_policy_agent(state: AgentState):
     query = state['messages'][-1].content
-    # Retrieve from ChromaDB
     docs = vector_db.similarity_search(query, k=3)
     context = "\n".join([d.page_content for d in docs])
-    prompt = f"POLICY CONTEXT:\n{context}\n\nROLE: Policy Compliance Expert. Answer based on context: {query}"
+    prompt = f"POLICY CONTEXT:\n{context}\n\nROLE: Policy Compliance Expert. Answer using the context: {query}"
     res = llm.invoke(prompt)
     return {"messages": [AIMessage(content=res.content, name="Policy_Expert")]}
 
@@ -155,20 +148,19 @@ def market_agent(state: AgentState):
 
 def scoring_agent(state: AgentState):
     query = state['messages'][-1].content
-    txn_summary = t_df.groupby('Payment_Status')['Amount_USD'].sum().to_string()
+    txn_summary = t_df.groupby('Payment_Status')['Amount_USD'].sum().to_string() if not t_df.empty else "No Data"
     prompt = f"TRANSACTION DATA:\n{txn_summary}\n\nROLE: Financial Risk Scorer. Analyze: {query}"
     res = llm.invoke(prompt)
     return {"messages": [AIMessage(content=res.content, name="Risk_Scorer")]}
 
 def router(state: AgentState):
     msg = state['messages'][-1].content.lower()
-    # RAG Logic Trigger
     if any(k in msg for k in ["policy", "manual", "rule", "guideline", "compliance"]): return "rag"
-    # Existing Data Triggers
     if any(k in msg for k in ["market", "trend", "price", "economy", "inflation", "sentiment"]): return "market"
     if any(k in msg for k in ["transaction", "payment", "overdue", "amount", "score", "default"]): return "scoring"
     return "manager"
 
+# Graph Construction
 builder = StateGraph(AgentState)
 builder.add_node("manager", manager_agent)
 builder.add_node("market", market_agent)
@@ -185,36 +177,25 @@ for node in ["manager", "market", "scoring", "rag"]:
 agent_brain = builder.compile()
 
 # --- 5. DASHBOARD LAYOUT ---
-st.sidebar.header("🛡️ Admin Controls")
-if st.sidebar.button("Force Push Vector DB to S3"):
-    sync_to_s3()
-
 risk_col = get_safe_col(p_df, ['Risk_Level', 'Risk'])
 complexity_col = get_safe_col(p_df, ['Complexity_Score', 'Complexity'])
 sentiment_col = get_safe_col(m_df, ['Market_Sentiment', 'Sentiment'])
 
 c1, c2, c3, c4 = st.columns(4)
 with c1:
-    st.markdown(f'<div class="metric-container" style="border-top: 5px solid #ef4444;"><div class="metric-label">Critical Risks</div><div class="metric-value" style="color: #ef4444;">{len(p_df[p_df[risk_col] == "High"]) if risk_col else 0}</div></div>', unsafe_allow_html=True)
+    val = len(p_df[p_df[risk_col] == "High"]) if risk_col and not p_df.empty else 0
+    st.markdown(f'<div class="metric-container" style="border-top: 5px solid #ef4444;"><div class="metric-label">Critical Risks</div><div class="metric-value" style="color: #ef4444;">{val}</div></div>', unsafe_allow_html=True)
 with c2:
-    st.markdown(f'<div class="metric-container" style="border-top: 5px solid #f59e0b;"><div class="metric-label">Knowledge Base Size</div><div class="metric-value" style="color: #f59e0b;">{vector_db._collection.count()} Docs</div></div>', unsafe_allow_html=True)
+    doc_count = vector_db._collection.count() if vector_db else 0
+    st.markdown(f'<div class="metric-container" style="border-top: 5px solid #f59e0b;"><div class="metric-label">Knowledge Base Size</div><div class="metric-value" style="color: #f59e0b;">{doc_count} Docs</div></div>', unsafe_allow_html=True)
 with c3:
-       # Calculate the value first to keep the f-string simple
     avg_val = p_df[complexity_col].mean() if complexity_col and not p_df.empty else 0
-    st.markdown(f"""<div class="metric-container" style="border-top: 5px solid #3b82f6;">
-        <div class="metric-label">Avg Complexity</div>
-        <div class="metric-value" style="color: #3b82f6;">{avg_val:.1f}</div>
-    </div>""", unsafe_allow_html=True)
+    st.markdown(f'<div class="metric-container" style="border-top: 5px solid #3b82f6;"><div class="metric-label">Avg Complexity</div><div class="metric-value" style="color: #3b82f6;">{avg_val:.1f}</div></div>', unsafe_allow_html=True)
 with c4:
-    # Calculate the sentiment value first
     sent_val = m_df[sentiment_col].iloc[-1] if sentiment_col and not m_df.empty else 0
-    st.markdown(f"""<div class="metric-container" style="border-top: 5px solid #10b981;">
-        <div class="metric-label">Market Sentiment</div>
-        <div class="metric-value" style="color: #10b981;">{sent_val:.2f}</div>
-    </div>""", unsafe_allow_html=True)
+    st.markdown(f'<div class="metric-container" style="border-top: 5px solid #10b981;"><div class="metric-label">Market Sentiment</div><div class="metric-value" style="color: #10b981;">{sent_val:.2f}</div></div>', unsafe_allow_html=True)
 
-st.write("") 
-
+# Visuals
 col_left, col_right = st.columns([3, 2])
 with col_left:
     if not p_df.empty:
@@ -245,4 +226,4 @@ if prompt := st.chat_input("Ask about high risks, market trends, or company poli
             st.chat_message("assistant").write(full_msg)
             st.session_state.history.append({"role": "assistant", "content": full_msg})
         except Exception as e:
-            st.error(f"Error: {e}")
+            st.error(f"Agent Error: {e}")
