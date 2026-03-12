@@ -124,8 +124,11 @@ def init_vector_db():
 vector_db = init_vector_db()
 
 # --- 4. AGENTIC BRAIN ---
-llm = ChatGoogleGenerativeAI(model="models/gemini-1.5-flash", temperature=0.1)
-
+#llm = ChatGoogleGenerativeAI(model="models/gemini-1.5-flash", temperature=0.1)
+llm = ChatGoogleGenerativeAI(
+    model="gemini-3-flash-preview", 
+    google_api_key=st.secrets["GOOGLE_API_KEY"]
+)
 class AgentState(TypedDict):
     messages: Annotated[List[BaseMessage], "History"]
 
