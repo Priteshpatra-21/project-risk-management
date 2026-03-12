@@ -196,10 +196,19 @@ with c1:
 with c2:
     st.markdown(f'<div class="metric-container" style="border-top: 5px solid #f59e0b;"><div class="metric-label">Knowledge Base Size</div><div class="metric-value" style="color: #f59e0b;">{vector_db._collection.count()} Docs</div></div>', unsafe_allow_html=True)
 with c3:
-    st.markdown(f'<div class="metric-container" style="border-top: 5px solid #3b82f6;"><div class="metric-label">Avg Complexity</div><div class="metric-value" style="color: #3b82f6;">{p_df[complexity_col].mean():.1f if complexity_col else 0}</div></div>', unsafe_allow_html=True)
+       # Calculate the value first to keep the f-string simple
+    avg_val = p_df[complexity_col].mean() if complexity_col and not p_df.empty else 0
+    st.markdown(f"""<div class="metric-container" style="border-top: 5px solid #3b82f6;">
+        <div class="metric-label">Avg Complexity</div>
+        <div class="metric-value" style="color: #3b82f6;">{avg_val:.1f}</div>
+    </div>""", unsafe_allow_html=True)
 with c4:
-    last_sent = m_df[sentiment_col].iloc[-1] if sentiment_col and not m_df.empty else 0
-    st.markdown(f'<div class="metric-container" style="border-top: 5px solid #10b981;"><div class="metric-label">Market Sentiment</div><div class="metric-value" style="color: #10b981;">{last_sent:.2f}</div></div>', unsafe_allow_html=True)
+    # Calculate the sentiment value first
+    sent_val = m_df[sentiment_col].iloc[-1] if sentiment_col and not m_df.empty else 0
+    st.markdown(f"""<div class="metric-container" style="border-top: 5px solid #10b981;">
+        <div class="metric-label">Market Sentiment</div>
+        <div class="metric-value" style="color: #10b981;">{sent_val:.2f}</div>
+    </div>""", unsafe_allow_html=True)
 
 st.write("") 
 
