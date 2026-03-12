@@ -116,7 +116,6 @@ def init_vector_db():
 vector_db = init_vector_db()
 
 # --- 4. AGENTIC BRAIN ---
-# UPDATED: Unified all agents to use Gemini 3 Flash
 llm = ChatGoogleGenerativeAI(
     model="gemini-3-flash-preview", 
     google_api_key=api_key,
@@ -164,11 +163,24 @@ def scoring_agent(state: AgentState):
     res = llm.invoke(prompt)
     return {"messages": [AIMessage(content=res.content, name="Risk_Scorer")]}
 
+def status_agent(state: AgentState):
+    query = state['messages'][-1].content
+    status_summary = p_df[['Project_ID', 'Project_Phase', 'Team_Turnover_Rate']].head(10).to_string()
+    prompt = f"STATUS DATA:\n{status_summary}\n\nTrack progress/delays: {query}"
+    return {"messages": [AIMessage(content=llm.invoke(prompt).content, name="Status_Tracker")]}
+
+def reporting_agent(state: AgentState):
+    query = state['messages'][-1].content
+    prompt = f"ROLE: Reporting Officer. Generate analytic summary for: {query}"
+    return {"messages": [AIMessage(content=llm.invoke(prompt).content, name="Reporting_Officer")]}
+
 def router(state: AgentState):
     msg = state['messages'][-1].content.lower()
     if any(k in msg for k in ["policy", "manual", "rule", "guideline", "compliance"]): return "rag"
     if any(k in msg for k in ["market", "trend", "price", "economy", "inflation", "sentiment"]): return "market"
     if any(k in msg for k in ["transaction", "payment", "overdue", "amount", "score", "default"]): return "scoring"
+    if any(k in msg for k in ["delay", "status", "turnover"]): return "status"
+    if any(k in msg for k in ["report", "summary", "analytics"]): return "reporting"
     return "manager"
 
 # Graph Construction
