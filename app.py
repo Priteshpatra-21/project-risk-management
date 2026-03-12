@@ -124,7 +124,7 @@ def init_vector_db():
 vector_db = init_vector_db()
 
 # --- 4. AGENTIC BRAIN ---
-llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.1)
+llm = ChatGoogleGenerativeAI(model="models/gemini-1.5-flash", temperature=0.1)
 
 class AgentState(TypedDict):
     messages: Annotated[List[BaseMessage], "History"]
