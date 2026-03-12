@@ -1,0 +1,18 @@
+# Web Framework & Visualization
+streamlit==1.42.0
+pandas>=2.2.0
+plotly>=6.0.0
+
+# AI & Orchestration
+langchain>=0.3.0
+langchain-google-genai>=2.0.1
+langgraph>=0.2.16
+google-generativeai>=0.8.0
+
+# Vector Database (RAG)
+chromadb>=0.5.0
+langchain-chroma>=0.1.2
+
+# Infrastructure & Cloud
+boto3>=1.34.0
+urllib3<2.0.0 
