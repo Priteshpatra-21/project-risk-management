@@ -12,7 +12,8 @@ from langgraph.graph import StateGraph, START, END
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from langchain_chroma import Chroma
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+#from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 # --- 1. LIGHT-THEME UI SETUP ---
 st.set_page_config(page_title="Risk Intel Pro", layout="wide", page_icon="🛡️")
