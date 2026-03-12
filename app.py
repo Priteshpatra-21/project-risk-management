@@ -17,7 +17,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 # --- 1. CONFIGURATION & UI SETUP ---
 st.set_page_config(page_title="Risk Intel Pro", layout="wide", page_icon="🛡️")
 
-# Syncing the path to the standard used in seed_db
+# Path to the vector database in the Streamlit container
 LOCAL_DB_PATH = "/tmp/vector_db"
 S3_VECTOR_PREFIX = "vector_db/" 
 
@@ -47,6 +47,7 @@ st.markdown("""
 
 # --- 2. AUTH & AWS S3 SYNC ---
 try:
+    # SECURE: Pulling the key from Streamlit Secrets, not hardcoded
     api_key = st.secrets["GOOGLE_API_KEY"]
     os.environ["GOOGLE_API_KEY"] = api_key
     genai.configure(api_key=api_key)
@@ -71,7 +72,6 @@ def sync_from_s3():
         for result in paginator.paginate(Bucket=BUCKET_NAME, Prefix=S3_VECTOR_PREFIX):
             if 'Contents' in result:
                 for obj in result['Contents']:
-                    # Recreate local folder structure from S3 keys
                     rel_path = os.path.relpath(obj['Key'], S3_VECTOR_PREFIX)
                     local_file = os.path.join(LOCAL_DB_PATH, rel_path)
                     os.makedirs(os.path.dirname(local_file), exist_ok=True)
@@ -101,7 +101,6 @@ def get_safe_col(df, options):
 @st.cache_resource
 def init_vector_db():
     sync_from_s3()
-    # UPDATED: Use Gemini Embedding 2 with explicit v1 version
     emb = GoogleGenerativeAIEmbeddings(
         model="models/gemini-embedding-2-preview",
         model_api_version="v1"
@@ -116,7 +115,6 @@ def init_vector_db():
 vector_db = init_vector_db()
 
 # --- 4. AGENTIC BRAIN ---
-# UPDATED: Unified all agents to use Gemini 3 Flash
 llm = ChatGoogleGenerativeAI(
     model="gemini-3-flash-preview", 
     google_api_key=api_key,
@@ -136,9 +134,7 @@ def rag_policy_agent(state: AgentState):
 
 def manager_agent(state: AgentState):
     query = state['messages'][-1].content
-    
-    # NEW: Provide a sample of actual rows so the agent can see Project IDs
-    # We combine the statistics (describe) with the first 20 rows of data
+    # IMPROVED: Providing specific IDs so AI doesn't just show stats
     data_context = f"""
     STATISTICAL SUMMARY:
     {p_df.describe().to_string()}
@@ -146,8 +142,7 @@ def manager_agent(state: AgentState):
     SAMPLE PROJECT DATA (Top 20):
     {p_df.head(20).to_string()}
     """
-    
-    prompt = f"PROJECT DATA CONTEXT:\n{data_context}\n\nROLE: Strategic Risk Manager. Identify specific projects by ID if possible: {query}"
+    prompt = f"PROJECT DATA CONTEXT:\n{data_context}\n\nROLE: Strategic Risk Manager. Identify specific projects by ID: {query}"
     res = llm.invoke(prompt)
     return {"messages": [AIMessage(content=res.content, name="Project_Risk_Manager")]}
 
@@ -171,7 +166,6 @@ def router(state: AgentState):
     if any(k in msg for k in ["transaction", "payment", "overdue", "amount", "score", "default"]): return "scoring"
     return "manager"
 
-# Graph Construction
 builder = StateGraph(AgentState)
 builder.add_node("manager", manager_agent)
 builder.add_node("market", market_agent)
@@ -206,7 +200,6 @@ with c4:
     sent_val = m_df[sentiment_col].iloc[-1] if sentiment_col and not m_df.empty else 0
     st.markdown(f'<div class="metric-container" style="border-top: 5px solid #10b981;"><div class="metric-label">Market Sentiment</div><div class="metric-value" style="color: #10b981;">{sent_val:.2f}</div></div>', unsafe_allow_html=True)
 
-# Visuals
 col_left, col_right = st.columns([3, 2])
 with col_left:
     if not p_df.empty:
@@ -214,7 +207,7 @@ with col_left:
         st.plotly_chart(fig, use_container_width=True)
 with col_right:
     if not p_df.empty:
-        fig2 = px.pie(p_df, names=risk_col, title="Portfolio Risk", color_discrete_sequence=['#ef4444', '#f59e0b', '#10b981'])
+        fig2 = px.pie(p_df, names=risk_col, title="Portfolio Risk", color_discrete_sequence=['#ef4444', '#f59e0b', '#10b981', '#3b82f6'])
         st.plotly_chart(fig2, use_container_width=True)
 
 # --- 6. AGENTIC CHAT ---
@@ -230,10 +223,14 @@ if prompt := st.chat_input("Ask about high risks, market trends, or company poli
     
     with st.spinner("🤖 Consulting Specialist Agents..."):
         try:
+            # CLEAN FIX: Only show .content to avoid technical signatures
             result = agent_brain.invoke({"messages": [HumanMessage(content=prompt)]})
             ans = result["messages"][-1]
             agent_name = ans.name.replace("_", " ")
-            full_msg = f"**{agent_name}**: {ans.content}"
+            
+            clean_content = ans.content if hasattr(ans, 'content') else str(ans)
+            full_msg = f"**{agent_name}**: {clean_content}"
+            
             st.chat_message("assistant").write(full_msg)
             st.session_state.history.append({"role": "assistant", "content": full_msg})
         except Exception as e:
