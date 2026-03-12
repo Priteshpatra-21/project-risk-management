@@ -136,7 +136,18 @@ def rag_policy_agent(state: AgentState):
 
 def manager_agent(state: AgentState):
     query = state['messages'][-1].content
-    prompt = f"PROJECT DATA:\n{p_df.describe().to_string()}\n\nROLE: Strategic Risk Manager. Analyze: {query}"
+    
+    # NEW: Provide a sample of actual rows so the agent can see Project IDs
+    # We combine the statistics (describe) with the first 20 rows of data
+    data_context = f"""
+    STATISTICAL SUMMARY:
+    {p_df.describe().to_string()}
+    
+    SAMPLE PROJECT DATA (Top 20):
+    {p_df.head(20).to_string()}
+    """
+    
+    prompt = f"PROJECT DATA CONTEXT:\n{data_context}\n\nROLE: Strategic Risk Manager. Identify specific projects by ID if possible: {query}"
     res = llm.invoke(prompt)
     return {"messages": [AIMessage(content=res.content, name="Project_Risk_Manager")]}
 
